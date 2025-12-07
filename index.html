@@ -222,7 +222,7 @@
         /* 分组容器布局 */
         #groupsContainer {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+            grid-template-columns: repeat(2, 1fr); /* 强制两列布局 */
             gap: 20px;
             margin-top: 20px;
         }
@@ -401,6 +401,31 @@
         .stat-card.status-on { border-left-color: var(--success-color); }
         .stat-card.status-off { border-left-color: var(--danger-color); }
         .stat-card.status-warn { border-left-color: #ffc107; }
+
+        /* 响应式调整 */
+        @media (max-width: 768px) {
+            body { padding: 15px; }
+            .container { gap: 15px; }
+            .card { padding: 15px; }
+            .status-bar { flex-direction: column; gap: 15px; text-align: center; }
+            .custom-controls { flex-direction: column; }
+            
+            /* 移动端强制单列显示分组 */
+            #groupsContainer { grid-template-columns: 1fr !important; }
+            
+            /* 移动端按钮网格保持2列，但减小间距 */
+            .button-grid { 
+                grid-template-columns: repeat(2, 1fr); 
+                gap: 10px;
+            }
+            
+            h2 { font-size: 1.2rem; }
+            
+            /* 仪表盘在移动端也改为2列 */
+            .dashboard-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
     </style>
 </head>
 <body>
