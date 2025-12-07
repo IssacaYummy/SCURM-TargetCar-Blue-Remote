@@ -377,6 +377,30 @@
             margin-top: 4px;
             text-align: right;
         }
+
+        /* 状态仪表盘样式 */
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        .stat-card {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+            border-left: 4px solid var(--primary-color);
+            transition: transform 0.2s;
+        }
+        .stat-card:hover { transform: translateY(-2px); }
+        .stat-label { font-size: 0.85rem; color: #666; margin-bottom: 5px; font-weight: 500; }
+        .stat-value { font-size: 1.2rem; font-weight: 700; color: #2c3e50; }
+        .stat-sub { font-size: 0.8rem; color: #888; margin-top: 4px; }
+        
+        /* 状态颜色修饰 */
+        .stat-card.status-on { border-left-color: var(--success-color); }
+        .stat-card.status-off { border-left-color: var(--danger-color); }
+        .stat-card.status-warn { border-left-color: #ffc107; }
     </style>
 </head>
 <body>
@@ -396,6 +420,32 @@
 
     <!-- 自定义按钮组件区 -->
     <div class="card">
+        <h2>设备状态监控</h2>
+        <div class="dashboard-grid">
+            <div class="stat-card" id="card-protect">
+                <div class="stat-label">保护模式</div>
+                <div class="stat-value" id="st-protect">--</div>
+            </div>
+            <div class="stat-card" id="card-spin">
+                <div class="stat-label">旋转模式</div>
+                <div class="stat-value" id="st-spin-mode">--</div>
+                <div class="stat-sub" id="st-spin-val">0.0 rpm</div>
+            </div>
+            <div class="stat-card" id="card-move">
+                <div class="stat-label">移动模式</div>
+                <div class="stat-value" id="st-move-mode">--</div>
+                <div class="stat-sub" id="st-move-val">0.0 rpm</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">旋转参数 (Amp/Base)</div>
+                <div class="stat-value" id="st-spin-params">-- / --</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">移动参数 (Min/Max)</div>
+                <div class="stat-value" id="st-move-params">-- / --</div>
+            </div>
+        </div>
+
         <h2>自定义发送组件</h2>
         <div class="custom-controls">
             <input type="text" id="btnLabel" placeholder="按钮名称 (例如: 前进)" style="flex: 1;">
@@ -473,6 +523,7 @@
     let bluetoothDevice;
     let rxCharacteristic; // 发送特征
     let txCharacteristic; // 接收特征
+    let rxBuffer = ''; // 接收缓冲区
 
     // 心跳包配置
     let isWriting = false;
@@ -550,8 +601,65 @@
     function handleNotifications(event) {
         const value = event.target.value;
         // 使用 stream: true 处理可能的分包情况
-        const text = decoder.decode(value, { stream: true });
-        log(`RX: ${text}`, 'received');
+        const chunk = decoder.decode(value, { stream: true });
+        rxBuffer += chunk;
+
+        // 尝试按行分割处理
+        let newlineIdx = rxBuffer.indexOf('\n');
+        while (newlineIdx !== -1) {
+            const line = rxBuffer.substring(0, newlineIdx).trim();
+            rxBuffer = rxBuffer.substring(newlineIdx + 1);
+            
+            if (line.length > 0) {
+                // 尝试解析 JSON 状态包
+                if (line.startsWith('{') && line.endsWith('}')) {
+                    try {
+                        const data = JSON.parse(line);
+                        updateStatusPanel(data);
+                        // 状态包不显示在日志中，避免刷屏
+                    } catch (e) {
+                        // 解析失败，当作普通日志显示
+                        log(`RX: ${line}`, 'received');
+                    }
+                } else {
+                    // 普通日志
+                    log(`RX: ${line}`, 'received');
+                }
+            }
+            
+            newlineIdx = rxBuffer.indexOf('\n');
+        }
+    }
+
+    function updateStatusPanel(data) {
+        // 更新保护模式
+        const elProtect = document.getElementById('st-protect');
+        const cardProtect = document.getElementById('card-protect');
+        if (data.protect) {
+            elProtect.textContent = data.protect;
+            cardProtect.className = 'stat-card ' + (data.protect === 'ON' ? 'status-on' : 'status-off');
+        }
+
+        // 更新旋转模式
+        if (data.spin_mode) document.getElementById('st-spin-mode').textContent = data.spin_mode;
+        if (data.current && data.current.spin !== undefined) {
+            document.getElementById('st-spin-val').textContent = data.current.spin.toFixed(1) + ' rpm';
+        }
+
+        // 更新移动模式
+        if (data.move_mode) document.getElementById('st-move-mode').textContent = data.move_mode;
+        if (data.current && data.current.move !== undefined) {
+            document.getElementById('st-move-val').textContent = data.current.move.toFixed(1) + ' rpm';
+        }
+
+        // 更新参数
+        if (data.params) {
+            const p = data.params;
+            document.getElementById('st-spin-params').textContent = 
+                `${p.s_spin_amp.toFixed(1)} / ${p.s_spin_base.toFixed(1)}`;
+            document.getElementById('st-move-params').textContent = 
+                `${p.s_move_min.toFixed(1)} / ${p.s_move_max.toFixed(1)}`;
+        }
     }
 
     async function sendData(text, isHeartbeat = false) {
