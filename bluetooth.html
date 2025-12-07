@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Web 蓝牙串口上位机 (BLE)</title>
+    <style>
+        :root {
+            --primary-color: #007bff;
+            --bg-color: #f4f4f9;
+            --card-bg: #ffffff;
+        }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: var(--bg-color);
+            margin: 0;
+            padding: 20px;
+            color: #333;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            display: grid;
+            gap: 20px;
+        }
+        .card {
+            background: var(--card-bg);
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        h2 { margin-top: 0; font-size: 1.2rem; border-bottom: 2px solid #eee; padding-bottom: 10px; }
+        
+        /* 状态栏 */
+        .status-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .status-indicator {
+            font-weight: bold;
+            color: #dc3545; /* 默认红色未连接 */
+        }
+        .status-indicator.connected { color: #28a745; }
+
+        /* 按钮样式 */
+        button {
+            background-color: var(--primary-color);
+            color: white;
+            border: none;
+            padding: 10px 15px;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        button:hover { background-color: #0056b3; }
+        button:disabled { background-color: #ccc; cursor: not-allowed; }
+        button.disconnect-btn { background-color: #dc3545; }
+        button.disconnect-btn:hover { background-color: #a71d2a; }
+
+        /* 自定义按钮区域 */
+        .custom-controls {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 15px;
+            flex-wrap: wrap;
+        }
+        input[type="text"] {
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            flex: 1;
+        }
+        .button-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+            gap: 10px;
+            margin-top: 15px;
+        }
+        .custom-btn-wrapper {
+            position: relative;
+        }
+        .custom-send-btn {
+            width: 100%;
+            background-color: #17a2b8;
+        }
+        .delete-btn {
+            position: absolute;
+            top: -5px;
+            right: -5px;
+            background: red;
+            color: white;
+            border-radius: 50%;
+            width: 20px;
+            height: 20px;
+            font-size: 12px;
+            line-height: 20px;
+            text-align: center;
+            cursor: pointer;
+            display: none;
+        }
+        .custom-btn-wrapper:hover .delete-btn { display: block; }
+
+        /* 日志区域 */
+        #logArea {
+            height: 300px;
+            background: #1e1e1e;
+            color: #00ff00;
+            font-family: 'Consolas', monospace;
+            padding: 10px;
+            border-radius: 4px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            font-size: 0.9rem;
+        }
+        .log-sent { color: #00bfff; }
+        .log-received { color: #00ff00; }
+        .log-sys { color: #ffff00; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <!-- 连接控制区 -->
+    <div class="card status-bar">
+        <div>
+            状态: <span id="statusText" class="status-indicator">未连接</span>
+            <span id="deviceName" style="margin-left: 10px; color: #666;"></span>
+        </div>
+        <div>
+            <button id="connectBtn">搜索并连接蓝牙</button>
+            <button id="disconnectBtn" class="disconnect-btn" disabled>断开连接</button>
+        </div>
+    </div>
+
+    <!-- 自定义按钮组件区 -->
+    <div class="card">
+        <h2>自定义发送组件</h2>
+        <div class="custom-controls">
+            <input type="text" id="btnLabel" placeholder="按钮名称 (例如: 前进)" style="flex: 1;">
+            <input type="text" id="btnCommand" placeholder="发送内容 (例如: w)" style="flex: 2;">
+            <button id="addBtn">添加按钮</button>
+        </div>
+        <div id="buttonContainer" class="button-grid">
+            <!-- 动态按钮将生成在这里 -->
+        </div>
+    </div>
+
+    <!-- 调试日志区 -->
+    <div class="card">
+        <h2>通信日志</h2>
+        <div id="logArea"></div>
+        <div style="margin-top: 10px; display: flex; gap: 10px;">
+            <input type="text" id="manualInput" placeholder="输入要发送的内容...">
+            <button id="sendManualBtn">发送</button>
+            <button id="clearLogBtn" style="background: #6c757d;">清空</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    // 常用 BLE 串口服务 UUID (Nordic UART, HM-10 等)
+    // 如果连接不上，可能需要根据你的设备修改这些 UUID
+    const SERVICE_UUID = "6e400001-b5a3-f393-e0a9-e50e24dcca9e"; // Nordic UART Service
+    const CHAR_RX_UUID = "6e400002-b5a3-f393-e0a9-e50e24dcca9e"; // Write (发送)
+    const CHAR_TX_UUID = "6e400003-b5a3-f393-e0a9-e50e24dcca9e"; // Notify (接收)
+
+    // 备用 UUID (HM-10 CC2541) - 如果上面的不行，尝试将 filter 逻辑改为接受所有设备
+    // const SERVICE_UUID_HM10 = "0000ffe0-0000-1000-8000-00805f9b34fb";
+
+    let bluetoothDevice;
+    let rxCharacteristic; // 发送特征
+    let txCharacteristic; // 接收特征
+
+    const connectBtn = document.getElementById('connectBtn');
+    const disconnectBtn = document.getElementById('disconnectBtn');
+    const statusText = document.getElementById('statusText');
+    const logArea = document.getElementById('logArea');
+
+    // === 1. 蓝牙连接逻辑 ===
+    connectBtn.addEventListener('click', async () => {
+        try {
+            log('正在搜索蓝牙设备...', 'sys');
+            
+            // 请求设备：这里配置为接受所有设备，但尝试访问特定服务
+            // 实际生产中建议使用 filters: [{services: [SERVICE_UUID]}] 来过滤
+            bluetoothDevice = await navigator.bluetooth.requestDevice({
+                // acceptAllDevices: true, // 如果不知道 UUID，可以开启这个(但需要 optionalServices)
+                filters: [{ namePrefix: 'BT' }, { namePrefix: 'HM' }, { services: [SERVICE_UUID] }], // 示例过滤器
+                optionalServices: [SERVICE_UUID]
+            });
+
+            log(`已选择设备: ${bluetoothDevice.name}`, 'sys');
+            bluetoothDevice.addEventListener('gattserverdisconnected', onDisconnected);
+
+            const server = await bluetoothDevice.gatt.connect();
+            log('已连接到 GATT 服务器', 'sys');
+
+            const service = await server.getPrimaryService(SERVICE_UUID);
+            log('已获取 UART 服务', 'sys');
+
+            rxCharacteristic = await service.getCharacteristic(CHAR_RX_UUID);
+            txCharacteristic = await service.getCharacteristic(CHAR_TX_UUID);
+
+            // 开启通知以接收数据
+            await txCharacteristic.startNotifications();
+            txCharacteristic.addEventListener('characteristicvaluechanged', handleNotifications);
+            
+            log('服务特征已就绪，可以通信', 'sys');
+            updateUIState(true);
+
+        } catch (error) {
+            log(`连接失败: ${error}`, 'sys');
+            console.error(error);
+        }
+    });
+
+    function handleNotifications(event) {
+        const value = event.target.value;
+        const decoder = new TextDecoder('utf-8');
+        const text = decoder.decode(value);
+        log(`RX: ${text}`, 'received');
+    }
+
+    async function sendData(text) {
+        if (!rxCharacteristic) {
+            alert('请先连接蓝牙设备！');
+            return;
+        }
+        try {
+            const encoder = new TextEncoder();
+            await rxCharacteristic.writeValue(encoder.encode(text));
+            log(`TX: ${text}`, 'sent');
+        } catch (error) {
+            log(`发送失败: ${error}`, 'sys');
+        }
+    }
+
+    disconnectBtn.addEventListener('click', () => {
+        if (bluetoothDevice && bluetoothDevice.gatt.connected) {
+            bluetoothDevice.gatt.disconnect();
+        }
+    });
+
+    function onDisconnected() {
+        log('设备已断开连接', 'sys');
+        updateUIState(false);
+        rxCharacteristic = null;
+        txCharacteristic = null;
+    }
+
+    function updateUIState(isConnected) {
+        statusText.textContent = isConnected ? '已连接' : '未连接';
+        statusText.classList.toggle('connected', isConnected);
+        document.getElementById('deviceName').textContent = isConnected ? bluetoothDevice.name : '';
+        connectBtn.disabled = isConnected;
+        disconnectBtn.disabled = !isConnected;
+    }
+
+    // === 2. 自定义按钮逻辑 ===
+    const addBtn = document.getElementById('addBtn');
+    const buttonContainer = document.getElementById('buttonContainer');
+    
+    // 从 localStorage 加载保存的按钮
+    window.addEventListener('load', loadButtons);
+
+    addBtn.addEventListener('click', () => {
+        const label = document.getElementById('btnLabel').value.trim();
+        const command = document.getElementById('btnCommand').value; // 允许空格
+        
+        if (!label || !command) {
+            alert('请输入按钮名称和发送内容');
+            return;
+        }
+
+        createCustomButton(label, command);
+        saveButtons();
+        
+        // 清空输入框
+        document.getElementById('btnLabel').value = '';
+        document.getElementById('btnCommand').value = '';
+    });
+
+    function createCustomButton(label, command) {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'custom-btn-wrapper';
+
+        const btn = document.createElement('button');
+        btn.className = 'custom-send-btn';
+        btn.textContent = label;
+        btn.title = `点击发送: ${command}`;
+        btn.onclick = () => sendData(command);
+
+        const delBtn = document.createElement('div');
+        delBtn.className = 'delete-btn';
+        delBtn.textContent = '×';
+        delBtn.onclick = () => {
+            wrapper.remove();
+            saveButtons();
+        };
+
+        wrapper.appendChild(btn);
+        wrapper.appendChild(delBtn);
+        buttonContainer.appendChild(wrapper);
+    }
+
+    // 简单的本地存储功能
+    function saveButtons() {
+        const buttons = [];
+        document.querySelectorAll('.custom-btn-wrapper').forEach(wrap => {
+            const btn = wrap.querySelector('button');
+            buttons.push({ label: btn.textContent, command: btn.title.replace('点击发送: ', '') });
+        });
+        localStorage.setItem('custom_buttons', JSON.stringify(buttons));
+    }
+
+    function loadButtons() {
+        const saved = localStorage.getItem('custom_buttons');
+        if (saved) {
+            JSON.parse(saved).forEach(b => createCustomButton(b.label, b.command));
+        }
+    }
+
+    // === 3. 日志与杂项 ===
+    document.getElementById('sendManualBtn').addEventListener('click', () => {
+        const text = document.getElementById('manualInput').value;
+        if(text) sendData(text);
+    });
+
+    document.getElementById('clearLogBtn').addEventListener('click', () => {
+        logArea.textContent = '';
+    });
+
+    function log(msg, type = 'sys') {
+        const time = new Date().toLocaleTimeString();
+        const line = document.createElement('div');
+        line.textContent = `[${time}] ${msg}`;
+        line.className = `log-${type}`;
+        logArea.appendChild(line);
+        logArea.scrollTop = logArea.scrollHeight;
+    }
+</script>
+
+</body>
+</html>
