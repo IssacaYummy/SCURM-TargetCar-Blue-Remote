@@ -219,6 +219,17 @@
             box-shadow: inset 0 3px 5px rgba(0,0,0,0.125);
         }
 
+        /* 分组样式 */
+        .control-group { margin-bottom: 24px; }
+        .control-group h3 { 
+            font-size: 1.1rem; 
+            color: var(--secondary-color); 
+            margin-bottom: 12px; 
+            border-left: 4px solid var(--primary-color);
+            padding-left: 10px;
+            margin-top: 0;
+        }
+
         /* 响应式调整 */
         @media (max-width: 600px) {
             body { padding: 15px; }
@@ -312,8 +323,28 @@
             <button id="addBtn">添加按钮</button>
             <button id="manageBtn" style="background-color: var(--secondary-color);">管理布局</button>
         </div>
-        <div id="buttonContainer" class="button-grid">
-            <!-- 动态按钮将生成在这里 -->
+        
+        <div id="groupsContainer">
+            <div class="control-group">
+                <h3>基础控制</h3>
+                <div id="grid-basic" class="button-grid"></div>
+            </div>
+            <div class="control-group">
+                <h3>模式选择</h3>
+                <div id="grid-modes" class="button-grid"></div>
+            </div>
+            <div class="control-group">
+                <h3>旋转微调</h3>
+                <div id="grid-rotation" class="button-grid"></div>
+            </div>
+            <div class="control-group">
+                <h3>移动微调</h3>
+                <div id="grid-movement" class="button-grid"></div>
+            </div>
+            <div class="control-group">
+                <h3>自定义/其他</h3>
+                <div id="buttonContainer" class="button-grid"></div>
+            </div>
         </div>
     </div>
 
@@ -560,7 +591,10 @@
         document.getElementById('btnCommand').value = '';
     });
 
-    function createCustomButton(label, command) {
+    function createCustomButton(label, command, targetGridId = 'buttonContainer') {
+        const container = document.getElementById(targetGridId);
+        if (!container) return;
+
         const wrapper = document.createElement('div');
         wrapper.className = 'custom-btn-wrapper';
         wrapper.draggable = true; // 开启拖拽
@@ -603,7 +637,7 @@
         wrapper.appendChild(btn);
         wrapper.appendChild(editBtn);
         wrapper.appendChild(delBtn);
-        buttonContainer.appendChild(wrapper);
+        container.appendChild(wrapper);
     }
 
     // === 拖拽排序逻辑 ===
@@ -624,7 +658,11 @@
         
         // 实时交换视觉效果
         if (dragSrcEl && dragSrcEl !== this) {
-            const container = document.getElementById('buttonContainer');
+            // 获取当前元素所在的容器
+            const container = this.parentNode;
+            // 确保只在同一个容器内排序（可选，如果允许跨组拖拽则不需要此判断）
+            // 这里我们允许跨组拖拽，因为 this.parentNode 就是目标容器
+            
             const children = Array.from(container.children);
             const srcIndex = children.indexOf(dragSrcEl);
             const targetIndex = children.indexOf(this);
@@ -710,27 +748,79 @@
         }, 3000);
     }
 
+    // === 2. 自定义按钮逻辑 ===
+    const addBtn = document.getElementById('addBtn');
+    const manageBtn = document.getElementById('manageBtn');
+    // const buttonContainer = document.getElementById('buttonContainer'); // 已废弃，改为动态获取
+    
+    // 每次加载都重置为默认按钮
+    window.addEventListener('load', loadButtons);
+
+    // 管理模式切换
+    manageBtn.addEventListener('click', () => {
+        const grids = document.querySelectorAll('.button-grid');
+        let isManageMode = false;
+        
+        grids.forEach(grid => {
+            isManageMode = grid.classList.toggle('manage-mode');
+        });
+        
+        manageBtn.classList.toggle('active', isManageMode);
+        manageBtn.textContent = isManageMode ? '完成编辑' : '管理布局';
+        
+        // 提示用户
+        if (isManageMode) {
+            showToast('已进入管理模式：可删除或编辑按钮');
+        }
+    });
+
+    function showToast(message) {
+        const container = document.getElementById('toastContainer');
+        const toast = document.createElement('div');
+        toast.className = 'toast';
+        toast.textContent = message;
+        container.appendChild(toast);
+        
+        // 3秒后自动移除
+        setTimeout(() => {
+            toast.style.opacity = '0';
+            toast.style.transform = 'translateY(20px)';
+            setTimeout(() => toast.remove(), 300);
+        }, 3000);
+    }
+
     function loadButtons() {
         // 清除旧的 localStorage 数据，确保完全重置
         localStorage.removeItem('custom_buttons');
 
-        const defaults = [
-            { label: '保护模式', command: '0' },
-            { label: '启动', command: '1' },
-            { label: '匀速转动', command: '2' },
-            { label: '正弦速度转动', command: '3' },
-            { label: '匀速移动', command: '4' },
-            { label: '正弦速度移动', command: '5' },
-            { label: '匀速旋转 +10', command: '6' },
-            { label: '匀速旋转 -10', command: '7' },
-            { label: '正弦旋转 +10', command: '8' },
-            { label: '正弦旋转 -10', command: '9' },
-            { label: '匀速移动 +10', command: ':' },
-            { label: '匀速移动 -10', command: ';' },
-            { label: '正弦移动 +10', command: '<' },
-            { label: '正弦移动 -10', command: '=' }
-        ];
-        defaults.forEach(b => createCustomButton(b.label, b.command));
+        const groups = {
+            'grid-basic': [
+                { label: '启动', command: '1' },
+                { label: '保护模式', command: '0' }
+            ],
+            'grid-modes': [
+                { label: '匀速转动', command: '2' },
+                { label: '正弦速度转动', command: '3' },
+                { label: '匀速移动', command: '4' },
+                { label: '正弦速度移动', command: '5' }
+            ],
+            'grid-rotation': [
+                { label: '匀速旋转 +10', command: '6' },
+                { label: '匀速旋转 -10', command: '7' },
+                { label: '正弦旋转 +10', command: '8' },
+                { label: '正弦旋转 -10', command: '9' }
+            ],
+            'grid-movement': [
+                { label: '匀速移动 +10', command: ':' },
+                { label: '匀速移动 -10', command: ';' },
+                { label: '正弦移动 +10', command: '<' },
+                { label: '正弦移动 -10', command: '=' }
+            ]
+        };
+
+        for (const [gridId, buttons] of Object.entries(groups)) {
+            buttons.forEach(b => createCustomButton(b.label, b.command, gridId));
+        }
     }
 
     // === 3. 日志与杂项 ===
