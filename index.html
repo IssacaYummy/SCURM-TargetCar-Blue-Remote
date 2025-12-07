@@ -584,14 +584,19 @@
     // === 2. 自定义按钮逻辑 ===
     const addBtn = document.getElementById('addBtn');
     const manageBtn = document.getElementById('manageBtn');
-    const buttonContainer = document.getElementById('buttonContainer');
     
     // 每次加载都重置为默认按钮
     window.addEventListener('load', loadButtons);
 
     // 管理模式切换
     manageBtn.addEventListener('click', () => {
-        const isManageMode = buttonContainer.classList.toggle('manage-mode');
+        const grids = document.querySelectorAll('.button-grid');
+        let isManageMode = false;
+        
+        grids.forEach(grid => {
+            isManageMode = grid.classList.toggle('manage-mode');
+        });
+        
         manageBtn.classList.toggle('active', isManageMode);
         manageBtn.textContent = isManageMode ? '完成编辑' : '管理布局';
         
@@ -610,7 +615,7 @@
             return;
         }
 
-        createCustomButton(label, command);
+        createCustomButton(label, command, 'buttonContainer');
         
         // 清空输入框
         document.getElementById('btnLabel').value = '';
@@ -757,47 +762,6 @@
     // 点击遮罩层关闭
     editModal.addEventListener('click', (e) => {
         if (e.target === editModal) closeModal();
-    });
-
-    function showToast(message) {
-        const container = document.getElementById('toastContainer');
-        const toast = document.createElement('div');
-        toast.className = 'toast';
-        toast.textContent = message;
-        container.appendChild(toast);
-        
-        // 3秒后自动移除
-        setTimeout(() => {
-            toast.style.opacity = '0';
-            toast.style.transform = 'translateY(20px)';
-            setTimeout(() => toast.remove(), 300);
-        }, 3000);
-    }
-
-    // === 2. 自定义按钮逻辑 ===
-    const addBtn = document.getElementById('addBtn');
-    const manageBtn = document.getElementById('manageBtn');
-    // const buttonContainer = document.getElementById('buttonContainer'); // 已废弃，改为动态获取
-    
-    // 每次加载都重置为默认按钮
-    window.addEventListener('load', loadButtons);
-
-    // 管理模式切换
-    manageBtn.addEventListener('click', () => {
-        const grids = document.querySelectorAll('.button-grid');
-        let isManageMode = false;
-        
-        grids.forEach(grid => {
-            isManageMode = grid.classList.toggle('manage-mode');
-        });
-        
-        manageBtn.classList.toggle('active', isManageMode);
-        manageBtn.textContent = isManageMode ? '完成编辑' : '管理布局';
-        
-        // 提示用户
-        if (isManageMode) {
-            showToast('已进入管理模式：可删除或编辑按钮');
-        }
     });
 
     function showToast(message) {
