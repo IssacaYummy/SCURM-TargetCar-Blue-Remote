@@ -500,10 +500,14 @@
         }
     });
 
+    // 文本解码器，默认为 GB18030 以支持中文 (兼容 GBK)
+    // 如果您的设备使用 UTF-8，请将其改为 'utf-8'
+    let decoder = new TextDecoder('gb18030');
+
     function handleNotifications(event) {
         const value = event.target.value;
-        const decoder = new TextDecoder('utf-8');
-        const text = decoder.decode(value);
+        // 使用 stream: true 处理可能的分包情况
+        const text = decoder.decode(value, { stream: true });
         log(`RX: ${text}`, 'received');
     }
 
