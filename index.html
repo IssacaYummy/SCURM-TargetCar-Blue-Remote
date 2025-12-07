@@ -319,21 +319,64 @@
         }
         @keyframes slideUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
 
-        /* 日志区域 */
+        /* 日志区域 - 聊天风格 */
         #logArea {
-            height: 300px;
-            background: #1e1e1e;
-            color: #00ff00;
-            font-family: 'Consolas', monospace;
-            padding: 10px;
-            border-radius: 4px;
+            height: 500px; /* 增加高度 */
+            background: #f5f7fa; /* 浅色背景 */
+            padding: 20px;
+            border-radius: 12px;
             overflow-y: auto;
-            white-space: pre-wrap;
-            font-size: 0.9rem;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            border: 1px solid #e0e0e0;
+            font-family: 'Segoe UI', sans-serif; /* 使用非等宽字体 */
         }
-        .log-sent { color: #00bfff; }
-        .log-received { color: #00ff00; }
-        .log-sys { color: #ffff00; }
+        
+        .log-message {
+            max-width: 80%;
+            padding: 10px 15px;
+            border-radius: 18px;
+            font-size: 0.95rem;
+            position: relative;
+            word-wrap: break-word;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+            line-height: 1.4;
+        }
+
+        .log-sent { 
+            align-self: flex-end;
+            background-color: #dcf8c6; /* 类似微信/WhatsApp的绿色 */
+            color: #333;
+            border-bottom-right-radius: 4px;
+        }
+        
+        .log-received { 
+            align-self: flex-start;
+            background-color: #ffffff;
+            color: #333;
+            border-bottom-left-radius: 4px;
+        }
+        
+        .log-sys { 
+            align-self: center;
+            background-color: rgba(0,0,0,0.05);
+            color: #666;
+            font-size: 0.85rem;
+            padding: 4px 12px;
+            border-radius: 12px;
+            max-width: 90%;
+            box-shadow: none;
+            text-align: center;
+        }
+
+        .log-time {
+            display: block;
+            font-size: 0.75rem;
+            color: rgba(0,0,0,0.4);
+            margin-top: 4px;
+            text-align: right;
+        }
     </style>
 </head>
 <body>
@@ -837,10 +880,35 @@
 
     function log(msg, type = 'sys') {
         const time = new Date().toLocaleTimeString();
-        const line = document.createElement('div');
-        line.textContent = `[${time}] ${msg}`;
-        line.className = `log-${type}`;
-        logArea.appendChild(line);
+        const msgDiv = document.createElement('div');
+        msgDiv.className = `log-message log-${type}`;
+        
+        // 清理前缀，使聊天界面更干净
+        let content = msg;
+        if (type === 'sent' && msg.startsWith('TX: ')) {
+            content = msg.substring(4);
+        } else if (type === 'received' && msg.startsWith('RX: ')) {
+            content = msg.substring(4);
+        }
+
+        // 创建内容元素
+        const textSpan = document.createElement('div');
+        textSpan.textContent = content;
+        msgDiv.appendChild(textSpan);
+
+        // 创建时间元素 (仅针对发送和接收的消息显示时间，系统消息不显示或简化)
+        if (type !== 'sys') {
+            const timeSpan = document.createElement('div');
+            timeSpan.className = 'log-time';
+            timeSpan.textContent = time;
+            msgDiv.appendChild(timeSpan);
+        } else {
+            // 系统消息也可以包含时间，但通常直接显示在文本中或作为 tooltip
+            // 这里我们简单地保留原样，或者也可以加上时间
+            // textSpan.textContent = `[${time}] ${content}`; 
+        }
+
+        logArea.appendChild(msgDiv);
         logArea.scrollTop = logArea.scrollHeight;
     }
 </script>
