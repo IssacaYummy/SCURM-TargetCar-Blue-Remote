@@ -186,6 +186,58 @@
         .custom-btn-wrapper:hover .delete-btn,
         .custom-btn-wrapper:hover .edit-btn { display: block; }
 
+        /* 响应式调整 */
+        @media (max-width: 600px) {
+            body { padding: 15px; }
+            .container { gap: 15px; }
+            .card { padding: 15px; }
+            .status-bar { flex-direction: column; gap: 15px; text-align: center; }
+            .custom-controls { flex-direction: column; }
+            .button-grid { grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); }
+            h2 { font-size: 1.2rem; }
+        }
+
+        /* 模态框样式 */
+        .modal-overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.5);
+            display: flex; justify-content: center; align-items: center;
+            opacity: 0; pointer-events: none; transition: opacity 0.3s;
+            z-index: 1000;
+            backdrop-filter: blur(4px);
+        }
+        .modal-overlay.active { opacity: 1; pointer-events: all; }
+        .modal {
+            background: var(--card-bg);
+            padding: 25px;
+            border-radius: 16px;
+            width: 90%;
+            max-width: 400px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.2);
+            transform: translateY(20px);
+            transition: transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+        .modal-overlay.active .modal { transform: translateY(0); }
+        .modal h3 { margin-top: 0; color: var(--primary-color); margin-bottom: 10px; }
+        .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
+        .modal-btn { padding: 8px 16px; font-size: 0.9rem; }
+
+        /* Toast 通知 */
+        .toast-container {
+            position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%);
+            z-index: 2000; display: flex; flex-direction: column; gap: 10px; pointer-events: none;
+        }
+        .toast {
+            background: rgba(33, 37, 41, 0.95);
+            color: white; padding: 12px 24px; border-radius: 50px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            animation: slideUp 0.3s ease-out;
+            font-size: 0.9rem;
+            text-align: center;
+            min-width: 200px;
+        }
+        @keyframes slideUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+
         /* 日志区域 */
         #logArea {
             height: 300px;
@@ -242,6 +294,22 @@
         </div>
     </div>
 </div>
+
+<!-- 编辑模态框 -->
+<div class="modal-overlay" id="editModal">
+    <div class="modal">
+        <h3>修改指令</h3>
+        <p id="editModalLabel" style="color: #666; margin-bottom: 15px; font-size: 0.95rem;"></p>
+        <input type="text" id="editModalInput" placeholder="输入新的发送内容" style="width: 100%; box-sizing: border-box;">
+        <div class="modal-actions">
+            <button class="modal-btn" onclick="closeModal()" style="background: #e9ecef; color: #495057;">取消</button>
+            <button class="modal-btn" id="saveEditBtn">确定</button>
+        </div>
+    </div>
+</div>
+
+<!-- Toast 容器 -->
+<div class="toast-container" id="toastContainer"></div>
 
 <script>
     // 常用 BLE 串口服务 UUID (Nordic UART, HM-10 等)
@@ -309,7 +377,7 @@
 
     async function sendData(text) {
         if (!rxCharacteristic) {
-            alert('请先连接蓝牙设备！');
+            showToast('请先连接蓝牙设备！');
             return;
         }
         try {
@@ -318,6 +386,7 @@
             log(`TX: ${text}`, 'sent');
         } catch (error) {
             log(`发送失败: ${error}`, 'sys');
+            showToast(`发送失败: ${error.message || error}`);
         }
     }
 
@@ -354,7 +423,7 @@
         const command = document.getElementById('btnCommand').value; // 允许空格
         
         if (!label || !command) {
-            alert('请输入按钮名称和发送内容');
+            showToast('请输入按钮名称和发送内容');
             return;
         }
 
@@ -378,19 +447,21 @@
         const editBtn = document.createElement('div');
         editBtn.className = 'edit-btn';
         editBtn.textContent = '✎';
-        editBtn.onclick = () => {
-            const newCommand = prompt(`修改 "${label}" 的发送内容:`, command);
-            if (newCommand !== null) {
+        editBtn.onclick = (e) => {
+            e.stopPropagation(); // 防止触发其他点击
+            openEditModal(label, command, (newCommand) => {
                 command = newCommand;
                 btn.title = `点击发送: ${command}`;
                 btn.onclick = () => sendData(command);
-            }
+                showToast(`已更新 "${label}" 的指令`);
+            });
         };
 
         const delBtn = document.createElement('div');
         delBtn.className = 'delete-btn';
         delBtn.textContent = '×';
-        delBtn.onclick = () => {
+        delBtn.onclick = (e) => {
+            e.stopPropagation();
             wrapper.remove();
         };
 
@@ -398,6 +469,52 @@
         wrapper.appendChild(editBtn);
         wrapper.appendChild(delBtn);
         buttonContainer.appendChild(wrapper);
+    }
+
+    // === 模态框与 Toast 逻辑 ===
+    let currentEditCallback = null;
+    const editModal = document.getElementById('editModal');
+    const editInput = document.getElementById('editModalInput');
+    const saveEditBtn = document.getElementById('saveEditBtn');
+
+    function openEditModal(label, currentCommand, callback) {
+        document.getElementById('editModalLabel').textContent = `正在修改 "${label}" 的发送内容`;
+        editInput.value = currentCommand;
+        currentEditCallback = callback;
+        editModal.classList.add('active');
+        editInput.focus();
+    }
+
+    function closeModal() {
+        editModal.classList.remove('active');
+        currentEditCallback = null;
+    }
+
+    saveEditBtn.addEventListener('click', () => {
+        if (currentEditCallback) {
+            currentEditCallback(editInput.value);
+        }
+        closeModal();
+    });
+
+    // 点击遮罩层关闭
+    editModal.addEventListener('click', (e) => {
+        if (e.target === editModal) closeModal();
+    });
+
+    function showToast(message) {
+        const container = document.getElementById('toastContainer');
+        const toast = document.createElement('div');
+        toast.className = 'toast';
+        toast.textContent = message;
+        container.appendChild(toast);
+        
+        // 3秒后自动移除
+        setTimeout(() => {
+            toast.style.opacity = '0';
+            toast.style.transform = 'translateY(20px)';
+            setTimeout(() => toast.remove(), 300);
+        }, 3000);
     }
 
     function loadButtons() {
