@@ -351,6 +351,12 @@
     let rxCharacteristic; // 发送特征
     let txCharacteristic; // 接收特征
 
+    // 心跳包配置
+    let isWriting = false;
+    const HEARTBEAT_INTERVAL_MS = 100;
+    const HEARTBEAT_DATA = 'h'; // 心跳包数据，可根据单片机需求修改
+    let heartbeatTimer = null;
+
     const connectBtn = document.getElementById('connectBtn');
     const disconnectBtn = document.getElementById('disconnectBtn');
     const statusText = document.getElementById('statusText');
@@ -421,21 +427,41 @@
         log(`RX: ${text}`, 'received');
     }
 
-    async function sendData(text) {
+    async function sendData(text, isHeartbeat = false) {
         if (!rxCharacteristic) {
-            showToast('请先连接蓝牙设备！');
+            if (!isHeartbeat) showToast('请先连接蓝牙设备！');
             return;
         }
+
+        // 如果是心跳包且当前正在发送数据，则丢弃本次心跳，优先保障其他指令
+        if (isHeartbeat && isWriting) {
+            return;
+        }
+
+        // 如果是普通指令且正在发送，等待发送完成（简单的排队机制）
+        while (isWriting) {
+            await new Promise(resolve => setTimeout(resolve, 10));
+        }
+
+        isWriting = true;
         try {
             const encoder = new TextEncoder();
             // 注意：某些模块（如 HM-10）可能不支持 writeValueWithResponse
             // 如果遇到问题，可以尝试 writeValueWithoutResponse (如果 API 支持)
             // 但标准 Web Bluetooth API 通常自动处理
             await rxCharacteristic.writeValue(encoder.encode(text));
-            log(`TX: ${text}`, 'sent');
+            
+            // 心跳包不记录日志
+            if (!isHeartbeat) {
+                log(`TX: ${text}`, 'sent');
+            }
         } catch (error) {
-            log(`发送失败: ${error}`, 'sys');
-            showToast(`发送失败: ${error.message || error}`);
+            if (!isHeartbeat) {
+                log(`发送失败: ${error}`, 'sys');
+                showToast(`发送失败: ${error.message || error}`);
+            }
+        } finally {
+            isWriting = false;
         }
     }
 
@@ -458,6 +484,28 @@
         document.getElementById('deviceName').textContent = isConnected ? bluetoothDevice.name : '';
         connectBtn.disabled = isConnected;
         disconnectBtn.disabled = !isConnected;
+
+        if (isConnected) {
+            startHeartbeat();
+        } else {
+            stopHeartbeat();
+        }
+    }
+
+    function startHeartbeat() {
+        stopHeartbeat();
+        // console.log("Starting heartbeat...");
+        heartbeatTimer = setInterval(() => {
+            sendData(HEARTBEAT_DATA, true);
+        }, HEARTBEAT_INTERVAL_MS);
+    }
+
+    function stopHeartbeat() {
+        if (heartbeatTimer) {
+            // console.log("Stopping heartbeat...");
+            clearInterval(heartbeatTimer);
+            heartbeatTimer = null;
+        }
     }
 
     // === 2. 自定义按钮逻辑 ===
