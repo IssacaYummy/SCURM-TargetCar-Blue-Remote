@@ -98,8 +98,26 @@
             text-align: center;
             cursor: pointer;
             display: none;
+            z-index: 10;
         }
-        .custom-btn-wrapper:hover .delete-btn { display: block; }
+        .edit-btn {
+            position: absolute;
+            top: -5px;
+            right: 20px;
+            background: #ffc107;
+            color: black;
+            border-radius: 50%;
+            width: 20px;
+            height: 20px;
+            font-size: 12px;
+            line-height: 20px;
+            text-align: center;
+            cursor: pointer;
+            display: none;
+            z-index: 10;
+        }
+        .custom-btn-wrapper:hover .delete-btn,
+        .custom-btn-wrapper:hover .edit-btn { display: block; }
 
         /* 日志区域 */
         #logArea {
@@ -291,6 +309,19 @@
         btn.title = `点击发送: ${command}`;
         btn.onclick = () => sendData(command);
 
+        const editBtn = document.createElement('div');
+        editBtn.className = 'edit-btn';
+        editBtn.textContent = '✎';
+        editBtn.onclick = () => {
+            const newCommand = prompt(`修改 "${label}" 的发送内容:`, command);
+            if (newCommand !== null) {
+                command = newCommand;
+                btn.title = `点击发送: ${command}`;
+                btn.onclick = () => sendData(command);
+                saveButtons();
+            }
+        };
+
         const delBtn = document.createElement('div');
         delBtn.className = 'delete-btn';
         delBtn.textContent = '×';
@@ -300,6 +331,7 @@
         };
 
         wrapper.appendChild(btn);
+        wrapper.appendChild(editBtn);
         wrapper.appendChild(delBtn);
         buttonContainer.appendChild(wrapper);
     }
@@ -318,6 +350,17 @@
         const saved = localStorage.getItem('custom_buttons');
         if (saved) {
             JSON.parse(saved).forEach(b => createCustomButton(b.label, b.command));
+        } else {
+            const defaults = [
+                { label: '保护模式', command: '0' },
+                { label: '启动', command: '1' },
+                { label: '匀速转动', command: '2' },
+                { label: '正弦速度转动', command: '3' },
+                { label: '匀速移动', command: '4' },
+                { label: '正弦速度移动', command: '5' }
+            ];
+            defaults.forEach(b => createCustomButton(b.label, b.command));
+            saveButtons();
         }
     }
 
