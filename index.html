@@ -128,9 +128,26 @@
             grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
             gap: 16px;
             margin-top: 15px;
+            align-content: start; /* 确保内容靠上对齐 */
         }
         .custom-btn-wrapper {
             position: relative;
+            cursor: grab;
+            transition: transform 0.2s, opacity 0.2s, box-shadow 0.2s;
+            user-select: none; /* 防止拖拽时选中文字 */
+        }
+        .custom-btn-wrapper:active {
+            cursor: grabbing;
+        }
+        .custom-btn-wrapper.dragging {
+            opacity: 0.4;
+            transform: scale(0.95);
+        }
+        .custom-btn-wrapper.over {
+            transform: scale(1.05);
+            z-index: 5;
+            box-shadow: 0 0 0 2px var(--primary-color);
+            border-radius: 8px;
         }
         .custom-send-btn {
             width: 100%;
@@ -141,6 +158,7 @@
             align-items: center;
             justify-content: center;
             font-weight: 600;
+            border-radius: 8px; /* 确保按钮圆角与 wrapper 一致 */
         }
         .custom-send-btn:hover {
             background-color: #138496;
@@ -437,6 +455,15 @@
     function createCustomButton(label, command) {
         const wrapper = document.createElement('div');
         wrapper.className = 'custom-btn-wrapper';
+        wrapper.draggable = true; // 开启拖拽
+
+        // 拖拽事件绑定
+        wrapper.addEventListener('dragstart', handleDragStart);
+        wrapper.addEventListener('dragover', handleDragOver);
+        wrapper.addEventListener('drop', handleDrop);
+        wrapper.addEventListener('dragenter', handleDragEnter);
+        wrapper.addEventListener('dragleave', handleDragLeave);
+        wrapper.addEventListener('dragend', handleDragEnd);
 
         const btn = document.createElement('button');
         btn.className = 'custom-send-btn';
@@ -469,6 +496,64 @@
         wrapper.appendChild(editBtn);
         wrapper.appendChild(delBtn);
         buttonContainer.appendChild(wrapper);
+    }
+
+    // === 拖拽排序逻辑 ===
+    let dragSrcEl = null;
+
+    function handleDragStart(e) {
+        dragSrcEl = this;
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/html', this.innerHTML);
+        this.classList.add('dragging');
+    }
+
+    function handleDragOver(e) {
+        if (e.preventDefault) {
+            e.preventDefault();
+        }
+        e.dataTransfer.dropEffect = 'move';
+        
+        // 实时交换视觉效果
+        if (dragSrcEl && dragSrcEl !== this) {
+            const container = document.getElementById('buttonContainer');
+            const children = Array.from(container.children);
+            const srcIndex = children.indexOf(dragSrcEl);
+            const targetIndex = children.indexOf(this);
+            
+            // 简单的 DOM 移动逻辑
+            if (srcIndex < targetIndex) {
+                this.after(dragSrcEl);
+            } else {
+                this.before(dragSrcEl);
+            }
+        }
+        return false;
+    }
+
+    function handleDragEnter(e) {
+        if (this !== dragSrcEl) {
+            this.classList.add('over');
+        }
+    }
+
+    function handleDragLeave(e) {
+        this.classList.remove('over');
+    }
+
+    function handleDrop(e) {
+        if (e.stopPropagation) {
+            e.stopPropagation();
+        }
+        return false;
+    }
+
+    function handleDragEnd(e) {
+        this.classList.remove('dragging');
+        document.querySelectorAll('.custom-btn-wrapper').forEach(item => {
+            item.classList.remove('over');
+        });
+        dragSrcEl = null;
     }
 
     // === 模态框与 Toast 逻辑 ===
