@@ -706,10 +706,17 @@
         isWriting = true;
         try {
             const encoder = new TextEncoder();
-            // 注意：某些模块（如 HM-10）可能不支持 writeValueWithResponse
-            // 如果遇到问题，可以尝试 writeValueWithoutResponse (如果 API 支持)
-            // 但标准 Web Bluetooth API 通常自动处理
-            await rxCharacteristic.writeValue(encoder.encode(text));
+            const data = encoder.encode(text);
+            
+            // 检查特征支持的写入方式（HM-10/BT24等模块通常只支持 writeWithoutResponse）
+            const props = rxCharacteristic.properties;
+            if (props.writeWithoutResponse) {
+                await rxCharacteristic.writeValueWithoutResponse(data);
+            } else if (props.write) {
+                await rxCharacteristic.writeValueWithResponse(data);
+            } else {
+                throw new Error('该特征不支持写入操作');
+            }
             
             // 心跳包不记录日志
             if (!isHeartbeat) {
