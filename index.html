@@ -552,7 +552,7 @@
 
     // 心跳包配置
     let isWriting = false;
-    const HEARTBEAT_INTERVAL_MS = 100;
+    const HEARTBEAT_INTERVAL_MS = 200;
     const HEARTBEAT_DATA = 'h'; // 心跳包数据，可根据单片机需求修改
     let heartbeatTimer = null;
 
@@ -656,29 +656,64 @@
         }
     }
 
+    // 短键名映射表 (用于解码精简 JSON)
+    // p: protect (0=OFF, 1=ON)
+    // s: spin_mode (0=Stop, 1=Uniform, 2=Sine)
+    // m: move_mode (0=Stop, 1=Init, 2=Calibrating, 3=Centering, 4=Uniform, 5=Sine)
+    // a: [u_spin, s_spin_amp, s_spin_base, u_move, s_move_min, s_move_max] 参数数组
+    // c: [spin_current, move_current] 实时值数组
+    const PROTECT_MAP = ['OFF', 'ON'];
+    const SPIN_MAP = ['Stop', 'Uniform', 'Sine'];
+    const MOVE_MAP = ['Stop', 'Init', 'Calibrating', 'Centering', 'Uniform', 'Sine'];
+
     function updateStatusPanel(data) {
-        // 更新保护模式
+        // 更新保护模式 (短键 p 或旧键 protect)
         const elProtect = document.getElementById('st-protect');
         const cardProtect = document.getElementById('card-protect');
-        if (data.protect) {
+        if (data.p !== undefined) {
+            const protectText = PROTECT_MAP[data.p] || 'Unknown';
+            elProtect.textContent = protectText;
+            cardProtect.className = 'stat-card ' + (data.p === 1 ? 'status-on' : 'status-off');
+        } else if (data.protect) {
             elProtect.textContent = data.protect;
             cardProtect.className = 'stat-card ' + (data.protect === 'ON' ? 'status-on' : 'status-off');
         }
 
-        // 更新旋转模式
-        if (data.spin_mode) document.getElementById('st-spin-mode').textContent = data.spin_mode;
-        if (data.current && data.current.spin !== undefined) {
-            document.getElementById('st-spin-val').textContent = data.current.spin.toFixed(1) + ' rpm';
+        // 更新旋转模式 (短键 s 或旧键 spin_mode)
+        if (data.s !== undefined) {
+            document.getElementById('st-spin-mode').textContent = SPIN_MAP[data.s] || 'Unknown';
+        } else if (data.spin_mode) {
+            document.getElementById('st-spin-mode').textContent = data.spin_mode;
         }
 
-        // 更新移动模式
-        if (data.move_mode) document.getElementById('st-move-mode').textContent = data.move_mode;
-        if (data.current && data.current.move !== undefined) {
-            document.getElementById('st-move-val').textContent = data.current.move.toFixed(1) + ' rpm';
+        // 更新移动模式 (短键 m 或旧键 move_mode)
+        if (data.m !== undefined) {
+            document.getElementById('st-move-mode').textContent = MOVE_MAP[data.m] || 'Unknown';
+        } else if (data.move_mode) {
+            document.getElementById('st-move-mode').textContent = data.move_mode;
         }
 
-        // 更新参数
-        if (data.params) {
+        // 更新实时值 (短键 c:[spin,move] 或旧键 current)
+        if (data.c && Array.isArray(data.c)) {
+            document.getElementById('st-spin-val').textContent = data.c[0].toFixed(1) + ' rpm';
+            document.getElementById('st-move-val').textContent = data.c[1].toFixed(1) + ' rpm';
+        } else if (data.current) {
+            if (data.current.spin !== undefined) {
+                document.getElementById('st-spin-val').textContent = data.current.spin.toFixed(1) + ' rpm';
+            }
+            if (data.current.move !== undefined) {
+                document.getElementById('st-move-val').textContent = data.current.move.toFixed(1) + ' rpm';
+            }
+        }
+
+        // 更新参数 (短键 a:[u_spin,amp,base,u_move,min,max] 或旧键 params)
+        if (data.a && Array.isArray(data.a)) {
+            // a[1]=振幅, a[2]=基准, a[4]=移动最小, a[5]=移动最大
+            document.getElementById('st-spin-params').textContent = 
+                `${data.a[1].toFixed(1)} / ${data.a[2].toFixed(1)}`;
+            document.getElementById('st-move-params').textContent = 
+                `${data.a[4].toFixed(1)} / ${data.a[5].toFixed(1)}`;
+        } else if (data.params) {
             const p = data.params;
             document.getElementById('st-spin-params').textContent = 
                 `${p.s_spin_amp.toFixed(1)} / ${p.s_spin_base.toFixed(1)}`;
@@ -981,7 +1016,9 @@
         const groups = {
             'grid-basic': [
                 { label: '启动', command: '1' },
-                { label: '保护模式', command: '0' }
+                { label: '保护模式', command: '0' },
+                { label: '停止转动', command: '>' },
+                { label: '停止移动', command: '?' }
             ],
             'grid-modes': [
                 { label: '匀速转动', command: '2' },
