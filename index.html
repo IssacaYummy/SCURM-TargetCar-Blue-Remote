@@ -469,6 +469,16 @@
                 <div class="stat-label">正弦移动参数 (最小值/最大值)</div>
                 <div class="stat-value" id="st-move-params">-- / --</div>
             </div>
+            <div class="stat-card" id="card-spin-motor">
+                <div class="stat-label">GM6020电机</div>
+                <div class="stat-value" id="st-spin-online">--</div>
+                <div class="stat-sub" id="st-spin-temp">-- °C</div>
+            </div>
+            <div class="stat-card" id="card-move-motor">
+                <div class="stat-label">M2006电机</div>
+                <div class="stat-value" id="st-move-online">--</div>
+                <div class="stat-sub" id="st-move-temp">-- °C</div>
+            </div>
         </div>
 
         <h2>控制按钮</h2>
@@ -719,6 +729,26 @@
                 `${p.s_spin_amp.toFixed(1)} / ${p.s_spin_base.toFixed(1)}`;
             document.getElementById('st-move-params').textContent = 
                 `${p.s_move_min.toFixed(1)} / ${p.s_move_max.toFixed(1)}`;
+        }
+
+        // 更新电机在线状态与温度 (短键 o:[spinOnline,moveOnline], t:[spinTemp,moveTemp])
+        if (data.o && Array.isArray(data.o)) {
+            const spinOnline = !!data.o[0];
+            const moveOnline = !!data.o[1];
+            const elSpinOnline = document.getElementById('st-spin-online');
+            const elMoveOnline = document.getElementById('st-move-online');
+            const cardSpinMotor = document.getElementById('card-spin-motor');
+            const cardMoveMotor = document.getElementById('card-move-motor');
+            elSpinOnline.textContent = spinOnline ? '在线' : '离线';
+            elMoveOnline.textContent = moveOnline ? '在线' : '离线';
+            if (cardSpinMotor) cardSpinMotor.className = 'stat-card ' + (spinOnline ? 'status-on' : 'status-off');
+            if (cardMoveMotor) cardMoveMotor.className = 'stat-card ' + (moveOnline ? 'status-on' : 'status-off');
+        }
+        if (data.t && Array.isArray(data.t)) {
+            const elSpinTemp = document.getElementById('st-spin-temp');
+            const elMoveTemp = document.getElementById('st-move-temp');
+            if (data.t[0] !== undefined) elSpinTemp.textContent = `${Number(data.t[0]).toFixed(1)} °C`;
+            if (data.t[1] !== undefined) elMoveTemp.textContent = `${Number(data.t[1]).toFixed(1)} °C`;
         }
     }
 
