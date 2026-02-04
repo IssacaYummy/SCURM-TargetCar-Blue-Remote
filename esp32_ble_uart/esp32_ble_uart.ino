@@ -29,7 +29,7 @@ class MyServerCallbacks: public BLEServerCallbacks {
 
 class MyCallbacks: public BLECharacteristicCallbacks {
     void onWrite(BLECharacteristic *pCharacteristic) {
-      std::string rxValue = pCharacteristic->getValue();
+      String rxValue = pCharacteristic->getValue();
 
       if (rxValue.length() > 0) {
         // Output received data to Serial (Transparent Transmission)
@@ -88,7 +88,7 @@ void loop() {
   // Check if there is data in Serial buffer to send to Web
   if (deviceConnected) {
     if (Serial.available()) {
-      std::string txString = "";
+      String txString = "";
       while (Serial.available()) {
         txString += (char)Serial.read();
         delay(2); // Small delay to allow buffer to fill
