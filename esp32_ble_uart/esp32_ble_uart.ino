@@ -43,6 +43,7 @@ class MyCallbacks: public BLECharacteristicCallbacks {
 };
 
 void setup() {
+  Serial.setRxBufferSize(1024); // Increase buffer size for larger payloads
   Serial.begin(115200);
 
   // Create the BLE Device
@@ -87,18 +88,18 @@ void setup() {
 void loop() {
   // Check if there is data in Serial buffer to send to Web
   if (deviceConnected) {
-    if (Serial.available()) {
-      String txString = "";
-      while (Serial.available()) {
-        txString += (char)Serial.read();
-        delay(2); // Small delay to allow buffer to fill
-      }
+    int avail = Serial.available();
+    if (avail > 0) {
+      // Limit packet size to 20 bytes for maximum compatibility (BLE MTU default)
+      size_t len = (avail > 20) ? 20 : avail;
+      uint8_t buf[20];
+      Serial.readBytes(buf, len);
       
-      if (txString.length() > 0) {
-          pTxCharacteristic->setValue(txString);
-          pTxCharacteristic->notify();
-          // Serial.print("Sent: "); Serial.println(txString.c_str());
-      }
+      pTxCharacteristic->setValue(buf, len);
+      pTxCharacteristic->notify();
+      
+      // Small delay to prevent congestion if sending a lot of data
+      delay(2); 
     }
   }
 
