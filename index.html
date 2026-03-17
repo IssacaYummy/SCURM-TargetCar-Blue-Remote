@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Web 蓝牙串口上位机 (BLE)</title>
+    <title>WiFi 远程控制</title>
     <style>
         :root {
             --primary-color: #4a90e2;
@@ -438,7 +438,7 @@
             <span id="deviceName" style="margin-left: 10px; color: #666;"></span>
         </div>
         <div>
-            <button id="connectBtn">搜索并连接蓝牙</button>
+            <button id="connectBtn">连接 WiFi</button>
             <button id="disconnectBtn" class="disconnect-btn" disabled>断开连接</button>
         </div>
     </div>
@@ -448,8 +448,8 @@
         <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #f0f0f0; padding-bottom: 15px; margin-bottom: 20px;">
             <h2 style="border-bottom: none; padding-bottom: 0; margin-bottom: 0;">靶车状态</h2>
             <div style="text-align: right; font-size: 0.85rem; color: #666; line-height: 1.5;">
-                <div>靶车蓝牙名称：Target_Car</div>
-                <div>蓝牙MAC地址：08:D1:F9:3B:08:FA</div>
+                <div>WiFi名称：Target_Car</div>
+                <div>WiFi密码：12345678</div>
             </div>
         </div>
         <div class="dashboard-grid">
@@ -544,130 +544,113 @@
 <div class="toast-container" id="toastContainer"></div>
 
 <script>
-    // 常见 BLE 串口服务 UUID 列表
-    // 包含 Nordic UART, HM-10/BT05/JDY-08 等常见模块
-    const UUID_CANDIDATES = [
-        {
-            name: "Nordic UART / ESP32",
-            service: "6e400001-b5a3-f393-e0a9-e50e24dcca9e",
-            rx: "6e400002-b5a3-f393-e0a9-e50e24dcca9e", // Write
-            tx: "6e400003-b5a3-f393-e0a9-e50e24dcca9e"  // Notify
-        },
-        {
-            name: "HM-10 / BT05 / BT24 / JDY",
-            service: "0000ffe0-0000-1000-8000-00805f9b34fb",
-            rx: "0000ffe1-0000-1000-8000-00805f9b34fb", // Write & Notify usually same
-            tx: "0000ffe1-0000-1000-8000-00805f9b34fb"
-        }
-    ];
+    // ============================================================
+    // WebSocket 配置 —— 如有需要只改这里
+    // ============================================================
+    const WS_URL = 'ws://192.168.4.1:81';        // ESP32 AP 热点地址
+    const RECONNECT_DELAY_MS = 3000;              // 断线后自动重连等待时间
+    // ============================================================
 
-    let bluetoothDevice;
-    let rxCharacteristic; // 发送特征
-    let txCharacteristic; // 接收特征
-    let rxBuffer = ''; // 接收缓冲区
-
-    // 心跳包配置
-    let isWriting = false;
-    const HEARTBEAT_INTERVAL_MS = 200;
-    const HEARTBEAT_DATA = 'h'; // 心跳包数据，可根据单片机需求修改
+    let ws = null;
+    let rxBuffer = '';
     let heartbeatTimer = null;
+    let reconnectTimer = null;
+    let manualDisconnect = false;               // 用户主动断开时不自动重连
 
-    const connectBtn = document.getElementById('connectBtn');
+    const connectBtn    = document.getElementById('connectBtn');
     const disconnectBtn = document.getElementById('disconnectBtn');
-    const statusText = document.getElementById('statusText');
-    const logArea = document.getElementById('logArea');
+    const statusText    = document.getElementById('statusText');
+    const logArea       = document.getElementById('logArea');
 
-    // === 1. 蓝牙连接逻辑 ===
-    connectBtn.addEventListener('click', async () => {
-        try {
-            log('正在搜索蓝牙设备...', 'sys');
-            
-            // 收集所有需要请求权限的服务 UUID
-            const allServiceUUIDs = UUID_CANDIDATES.map(c => c.service);
-
-            // 请求设备：使用 acceptAllDevices 允许用户选择任意设备
-            // 必须在 optionalServices 中列出我们可能用到的所有服务
-            bluetoothDevice = await navigator.bluetooth.requestDevice({
-                acceptAllDevices: true,
-                optionalServices: allServiceUUIDs
-            });
-
-            log(`已选择设备: ${bluetoothDevice.name}`, 'sys');
-            bluetoothDevice.addEventListener('gattserverdisconnected', onDisconnected);
-
-            const server = await bluetoothDevice.gatt.connect();
-            log('已连接到 GATT 服务器', 'sys');
-
-            // 尝试匹配已知的服务
-            let service = null;
-            let candidate = null;
-
-            for (const c of UUID_CANDIDATES) {
-                try {
-                    service = await server.getPrimaryService(c.service);
-                    candidate = c;
-                    log(`发现服务: ${c.name} (${c.service})`, 'sys');
-                    break; // 找到一个就停止
-                } catch (e) {
-                    // 忽略错误，继续尝试下一个
-                }
-            }
-
-            if (!service) {
-                throw new Error("未找到支持的串口服务 (Nordic UART 或 HM-10)");
-            }
-
-            // 获取特征值
-            rxCharacteristic = await service.getCharacteristic(candidate.rx);
-            txCharacteristic = await service.getCharacteristic(candidate.tx);
-
-            // 开启通知以接收数据
-            await txCharacteristic.startNotifications();
-            txCharacteristic.addEventListener('characteristicvaluechanged', handleNotifications);
-            
-            log('服务特征已就绪，可以通信', 'sys');
-            updateUIState(true);
-
-        } catch (error) {
-            log(`连接失败: ${error}`, 'sys');
-            console.error(error);
-            showToast(`连接失败: ${error.message || error}`);
-        }
+    // === 1. WebSocket 连接逻辑 ===
+    connectBtn.addEventListener('click', () => {
+        manualDisconnect = false;
+        connectWebSocket();
     });
 
-    // 文本解码器，默认为 GB18030 以支持中文 (兼容 GBK)
-    // 如果您的设备使用 UTF-8，请将其改为 'utf-8'
-    let decoder = new TextDecoder('gb18030');
+    function connectWebSocket() {
+        // 如果已经在连接中或已连接，直接返回
+        if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
 
-    function handleNotifications(event) {
-        const value = event.target.value;
-        // 使用 stream: true 处理可能的分包情况
-        const chunk = decoder.decode(value, { stream: true });
-        rxBuffer += chunk;
+        log(`正在连接 ${WS_URL} ...`, 'sys');
+        log('请确认手机/电脑已连接到 Target_Car WiFi 热点', 'sys');
 
-        // 尝试按行分割处理
+        try {
+            ws = new WebSocket(WS_URL);
+        } catch (e) {
+            log(`创建 WebSocket 失败: ${e.message}`, 'sys');
+            scheduleReconnect();
+            return;
+        }
+
+        ws.onopen = () => {
+            log('WebSocket 已连接 ✅', 'sys');
+            updateUIState(true);
+            if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+        };
+
+        ws.onmessage = (event) => {
+            // WebSocket 文本帧直接处理，无需额外解码
+            handleMessage(event.data);
+        };
+
+        ws.onclose = (event) => {
+            if (event.wasClean) {
+                log(`连接已正常关闭 (code ${event.code})`, 'sys');
+            } else {
+                log('连接意外断开，将自动重连...', 'sys');
+            }
+            updateUIState(false);
+            if (!manualDisconnect) scheduleReconnect();
+        };
+
+        ws.onerror = () => {
+            log('WebSocket 错误，请确认已连接到 Target_Car WiFi', 'sys');
+            // onerror 后必然触发 onclose，由 onclose 处理重连
+        };
+    }
+
+    function scheduleReconnect() {
+        if (reconnectTimer) return;
+        reconnectTimer = setTimeout(() => {
+            reconnectTimer = null;
+            if (!manualDisconnect) {
+                log(`尝试重新连接...`, 'sys');
+                connectWebSocket();
+            }
+        }, RECONNECT_DELAY_MS);
+    }
+
+    // 文本解码器（WebSocket 文本帧为字符串，此解码器用于处理可能的二进制帧）
+    const decoder = new TextDecoder('utf-8');
+
+    function handleMessage(data) {
+        // 兼容字符串和二进制（ArrayBuffer）消息
+        const text = (typeof data === 'string') ? data :
+                     (data instanceof ArrayBuffer) ? decoder.decode(data) :
+                     decoder.decode(new Uint8Array(data));
+        rxBuffer += text;
+
+        // 按行处理（与原蓝牙版逻辑完全一致）
         let newlineIdx = rxBuffer.indexOf('\n');
         while (newlineIdx !== -1) {
             const line = rxBuffer.substring(0, newlineIdx).trim();
             rxBuffer = rxBuffer.substring(newlineIdx + 1);
-            
+
             if (line.length > 0) {
                 // 尝试解析 JSON 状态包
                 if (line.startsWith('{') && line.endsWith('}')) {
                     try {
-                        const data = JSON.parse(line);
-                        updateStatusPanel(data);
+                        const parsed = JSON.parse(line);
+                        updateStatusPanel(parsed);
                         // 状态包不显示在日志中，避免刷屏
                     } catch (e) {
-                        // 解析失败，当作普通日志显示
                         log(`RX: ${line}`, 'received');
                     }
                 } else {
-                    // 普通日志
                     log(`RX: ${line}`, 'received');
                 }
             }
-            
             newlineIdx = rxBuffer.indexOf('\n');
         }
     }
@@ -679,16 +662,15 @@
     // a: [u_spin, s_spin_amp, s_spin_base, u_move, s_move_min, s_move_max] 参数数组
     // c: [spin_current, move_current] 实时值数组
     const PROTECT_MAP = ['OFF', 'ON'];
-    const SPIN_MAP = ['Stop', 'Uniform', 'Sine'];
-    const MOVE_MAP = ['Stop', 'Init', 'Calibrating', 'Centering', 'Uniform', 'Sine'];
+    const SPIN_MAP    = ['Stop', 'Uniform', 'Sine'];
+    const MOVE_MAP    = ['Stop', 'Init', 'Calibrating', 'Centering', 'Uniform', 'Sine'];
 
     function updateStatusPanel(data) {
         // 更新保护模式 (短键 p 或旧键 protect)
-        const elProtect = document.getElementById('st-protect');
+        const elProtect  = document.getElementById('st-protect');
         const cardProtect = document.getElementById('card-protect');
         if (data.p !== undefined) {
-            const protectText = PROTECT_MAP[data.p] || 'Unknown';
-            elProtect.textContent = protectText;
+            elProtect.textContent = PROTECT_MAP[data.p] || 'Unknown';
             cardProtect.className = 'stat-card ' + (data.p === 1 ? 'status-on' : 'status-off');
         } else if (data.protect) {
             elProtect.textContent = data.protect;
@@ -714,35 +696,32 @@
             document.getElementById('st-spin-val').textContent = data.c[0].toFixed(1) + ' rpm';
             document.getElementById('st-move-val').textContent = data.c[1].toFixed(1) + ' rpm';
         } else if (data.current) {
-            if (data.current.spin !== undefined) {
+            if (data.current.spin !== undefined)
                 document.getElementById('st-spin-val').textContent = data.current.spin.toFixed(1) + ' rpm';
-            }
-            if (data.current.move !== undefined) {
+            if (data.current.move !== undefined)
                 document.getElementById('st-move-val').textContent = data.current.move.toFixed(1) + ' rpm';
-            }
         }
 
         // 更新参数 (短键 a:[u_spin,amp,base,u_move,min,max] 或旧键 params)
         if (data.a && Array.isArray(data.a)) {
-            // a[1]=振幅, a[2]=基准, a[4]=移动最小, a[5]=移动最大
-            document.getElementById('st-spin-params').textContent = 
+            document.getElementById('st-spin-params').textContent =
                 `${data.a[1].toFixed(1)} / ${data.a[2].toFixed(1)}`;
-            document.getElementById('st-move-params').textContent = 
+            document.getElementById('st-move-params').textContent =
                 `${data.a[4].toFixed(1)} / ${data.a[5].toFixed(1)}`;
         } else if (data.params) {
             const p = data.params;
-            document.getElementById('st-spin-params').textContent = 
+            document.getElementById('st-spin-params').textContent =
                 `${p.s_spin_amp.toFixed(1)} / ${p.s_spin_base.toFixed(1)}`;
-            document.getElementById('st-move-params').textContent = 
+            document.getElementById('st-move-params').textContent =
                 `${p.s_move_min.toFixed(1)} / ${p.s_move_max.toFixed(1)}`;
         }
 
-        // 更新电机在线状态与温度 (短键 o:[spinOnline,moveOnline], t:[spinTemp,moveTemp])
+        // 更新电机在线状态与温度
         if (data.o && Array.isArray(data.o)) {
             const spinOnline = !!data.o[0];
             const moveOnline = !!data.o[1];
-            const elSpinOnline = document.getElementById('st-spin-online');
-            const elMoveOnline = document.getElementById('st-move-online');
+            const elSpinOnline  = document.getElementById('st-spin-online');
+            const elMoveOnline  = document.getElementById('st-move-online');
             const cardSpinMotor = document.getElementById('card-spin-motor');
             const cardMoveMotor = document.getElementById('card-move-motor');
             elSpinOnline.textContent = spinOnline ? '在线' : '离线';
@@ -758,93 +737,39 @@
         }
     }
 
-    async function sendData(text, isHeartbeat = false) {
-        if (!rxCharacteristic) {
-            if (!isHeartbeat) showToast('请先连接蓝牙设备！');
+    // 发送数据（签名与原蓝牙版完全相同，保证所有按钮回调不变）
+    function sendData(text, isHeartbeat = false) {
+        if (!ws || ws.readyState !== WebSocket.OPEN) {
+            if (!isHeartbeat) showToast('请先连接 WiFi（点击"连接 WiFi"按钮）');
             return;
         }
-
-        // 如果是心跳包且当前正在发送数据，则丢弃本次心跳，优先保障其他指令
-        if (isHeartbeat && isWriting) {
-            return;
-        }
-
-        // 如果是普通指令且正在发送，等待发送完成（简单的排队机制）
-        while (isWriting) {
-            await new Promise(resolve => setTimeout(resolve, 10));
-        }
-
-        isWriting = true;
         try {
-            const encoder = new TextEncoder();
-            const data = encoder.encode(text);
-            
-            // 检查特征支持的写入方式（HM-10/BT24等模块通常只支持 writeWithoutResponse）
-            const props = rxCharacteristic.properties;
-            if (props.writeWithoutResponse) {
-                await rxCharacteristic.writeValueWithoutResponse(data);
-            } else if (props.write) {
-                await rxCharacteristic.writeValueWithResponse(data);
-            } else {
-                throw new Error('该特征不支持写入操作');
-            }
-            
-            // 心跳包不记录日志
-            if (!isHeartbeat) {
-                log(`TX: ${text}`, 'sent');
-            }
+            ws.send(text);
+            if (!isHeartbeat) log(`TX: ${text}`, 'sent');
         } catch (error) {
             if (!isHeartbeat) {
                 log(`发送失败: ${error}`, 'sys');
                 showToast(`发送失败: ${error.message || error}`);
             }
-        } finally {
-            isWriting = false;
         }
     }
 
+    // 断开按钮
     disconnectBtn.addEventListener('click', () => {
-        if (bluetoothDevice && bluetoothDevice.gatt.connected) {
-            bluetoothDevice.gatt.disconnect();
-        }
+        manualDisconnect = true;                  // 阻止自动重连
+        if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+        if (ws) ws.close(1000, 'User disconnected');
+        log('已主动断开连接', 'sys');
     });
 
-    function onDisconnected() {
-        log('设备已断开连接', 'sys');
-        updateUIState(false);
-        rxCharacteristic = null;
-        txCharacteristic = null;
+    function updateUIState(connected) {
+        statusText.textContent = connected ? '已连接' : '未连接';
+        statusText.classList.toggle('connected', connected);
+        document.getElementById('deviceName').textContent = connected ? 'Target_Car (WiFi)' : '';
+        connectBtn.disabled  = connected;
+        disconnectBtn.disabled = !connected;
     }
 
-    function updateUIState(isConnected) {
-        statusText.textContent = isConnected ? '已连接' : '未连接';
-        statusText.classList.toggle('connected', isConnected);
-        document.getElementById('deviceName').textContent = isConnected ? bluetoothDevice.name : '';
-        connectBtn.disabled = isConnected;
-        disconnectBtn.disabled = !isConnected;
-
-        if (isConnected) {
-            startHeartbeat();
-        } else {
-            stopHeartbeat();
-        }
-    }
-
-    function startHeartbeat() {
-        stopHeartbeat();
-        // console.log("Starting heartbeat...");
-        heartbeatTimer = setInterval(() => {
-            sendData(HEARTBEAT_DATA, true);
-        }, HEARTBEAT_INTERVAL_MS);
-    }
-
-    function stopHeartbeat() {
-        if (heartbeatTimer) {
-            // console.log("Stopping heartbeat...");
-            clearInterval(heartbeatTimer);
-            heartbeatTimer = null;
-        }
-    }
 
     // === 2. 自定义按钮逻辑 ===
     const addBtn = document.getElementById('addBtn');
@@ -1125,6 +1050,3 @@
         logArea.scrollTop = logArea.scrollHeight;
     }
 </script>
-
-</body>
-</html>
